@@ -1,5 +1,5 @@
 {
-  "name": "irc-steam-relay",
+  "name": "chat-relay",
   "version": "0.0.7",
   "dependencies": {
     "irc": "*",
