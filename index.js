@@ -241,7 +241,7 @@ module.exports = function(details) {
   slackRtm.on(RTM_EVENTS.MESSAGE, function handleRtmMessage(message) {
 
     // TODO: Instead of ignoring all bots, should just ignore messages from this bot
-    if (message.subtype == "bot_message" || message.user == "U2KEF5VTR") {
+    if (message.subtype == "bot_message" || message.user == details.botid) {
       return;
     }
 
