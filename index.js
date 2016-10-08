@@ -222,7 +222,7 @@ module.exports = function(details) {
   var slackWeb = new WebClient(details.slackToken);
 
   var slackRtm = new RtmClient(details.slackToken, {
-    logLevel: 'debug', // check this out for more on logger: https://github.com/winstonjs/winston
+    logLevel: 'error', // check this out for more on logger: https://github.com/winstonjs/winston
     dataStore: new MemoryDataStore() // pass a new MemoryDataStore instance to cache information
   });
 
