@@ -1,6 +1,16 @@
 var Steam = require('steam');
 var fs = require('fs');
 
+var Slack = require('@slack/client');
+var WebClient = Slack.WebClient;
+var RtmClient = Slack.RtmClient;
+var MemoryDataStore = Slack.MemoryDataStore;
+var CLIENT_EVENTS = Slack.CLIENT_EVENTS;
+var RTM_EVENTS = Slack.RTM_EVENTS;
+
+var IRC_ICON = "https://raw.githubusercontent.com/hinfaits/irc-steam-relay/master/static/icon/irc_icon.png";
+var STEAM_ICON = "https://raw.githubusercontent.com/hinfaits/irc-steam-relay/master/static/icon/steam_icon.png";
+
 // if we've saved a server list, use it
 if (fs.existsSync('servers')) {
   Steam.servers = JSON.parse(fs.readFileSync('servers'));
@@ -10,11 +20,13 @@ module.exports = function(details) {
   var msgFormat = details.msgFormat || '\u000302%s\u000f: %s';
   var emoteFormat = details.emoteFormat || '\u000302%s %s';
   var msgFormatGame = details.msgFormatGame || details.msgFormat || '\u000303%s\u000f: %s';
-  var emoteFormatGame = details.emoteFormatGame || details.emoteFormat || '\u000303%s %s'; 
+  var emoteFormatGame = details.emoteFormatGame || details.emoteFormat || '\u000303%s %s';
+  
+  var slackChannelId = "";
   
   var queue = [];
   
-  function sendMessage(msg) {
+  function sendSteam(msg) {
     if (steam.loggedOn) {
       steam.sendMessage(details.chatroom, msg);
     } else {
@@ -23,16 +35,17 @@ module.exports = function(details) {
   }
   
   var irc = new (require('irc')).Client(details.server, details.nick, {
-    channels: [details.channel]
+    channels: [details.ircChannel]
   });
   
   irc.on('error', function(err) {
     console.log('IRC error: ', err);
   });
   
-  irc.on('message' + details.channel, function(from, message) {
-    sendMessage('<' + from + '> ' + message);
-    
+  irc.on('message' + details.ircChannel, function(from, message) {
+    sendSteam('<' + from + '> ' + message);
+    slackWeb.chat.postMessage(slackChannelId, message, {username: from, icon_url: IRC_ICON}, function() {});
+
     if (!steam.loggedOn)
       return;
     
@@ -46,7 +59,7 @@ module.exports = function(details) {
     
     if (parts && parts[1] in triggers) {
       irc.whois(from, function(info) {
-        if (info.channels.indexOf('@' + details.channel) == -1)
+        if (info.channels.indexOf('@' + details.ircChannel) == -1)
           return; // not OP, go away
         
         Object.keys(steam.users).filter(function(steamID) {
@@ -63,37 +76,50 @@ module.exports = function(details) {
   });
   
   irc.on('action', function(from, to, message) {
-    if (to == details.channel) {
-      sendMessage(from + ' ' + message);
+    if (to == details.ircChannel) {
+      sendSteam(from + ' ' + message);
+      slackWeb.chat.postMessage(slackChannelId, message, {username: from, icon_url: IRC_ICON}, function() {});
     }
   });
   
   irc.on('+mode', function(channel, by, mode, argument, message) {
-    if (channel == details.channel && mode == 'b') {
-      sendMessage(by + ' sets ban on ' + argument);
+    if (channel == details.ircChannel && mode == 'b') {
+      var msg = 'IRC - ' + by + ' sets ban on ' + argument;
+      sendSteam(msg);
+      slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
     }
   });
   
   irc.on('-mode', function(channel, by, mode, argument, message) {
-    if (channel == details.channel && mode == 'b') {
-      sendMessage(by + ' removes ban on ' + argument);
+    if (channel == details.ircChannel && mode == 'b') {
+      var msg = 'IRC - ' + by + ' removes ban on ' + argument;
+      sendSteam(msg);
+      slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
     }
   });
   
-  irc.on('kick' + details.channel, function(nick, by, reason, message) {
-    sendMessage(by + ' has kicked ' + nick + ' from ' + details.channel + ' (' + reason + ')');
+  irc.on('kick' + details.ircChannel, function(nick, by, reason, message) {
+    var msg = 'IRC - ' + by + ' has kicked ' + nick + ' from ' + details.ircChannel + ' (' + reason + ')';
+    sendSteam(msg);
+    slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
   });
   
-  irc.on('join' + details.channel, function(nick) {
-    sendMessage(nick + ' has joined ' + details.channel);
+  irc.on('join' + details.ircChannel, function(nick) {
+    var msg = 'IRC - ' + nick + ' has joined ' + details.ircChannel;
+    sendSteam(msg);
+    slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
   });
   
-  irc.on('part' + details.channel, function(nick) {
-    sendMessage(nick + ' has left ' + details.channel);
+  irc.on('part' + details.ircChannel, function(nick) {
+    var msg = 'IRC - ' + nick + ' has left ' + details.ircChannel;
+    sendSteam(msg);
+    slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
   });
   
   irc.on('quit', function(nick, reason) {
-    sendMessage(nick + ' has quit (' + reason + ')');
+    var msg = 'IRC - ' + nick + ' has quit (' + reason + ')';
+    sendSteam(msg);
+    slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
   });
   
   var steam = new Steam.SteamClient();
@@ -114,7 +140,7 @@ module.exports = function(details) {
     steam.setPersonaState(Steam.EPersonaState.Online);
     steam.joinChat(details.chatroom);
     
-    queue.forEach(sendMessage);
+    queue.forEach(sendSteam);
     queue = [];
   });
   
@@ -122,28 +148,31 @@ module.exports = function(details) {
     var game = steam.users[chatter].gameName;
     var name = steam.users[chatter].playerName;
     if (msgType == Steam.EChatEntryType.ChatMsg) {
-      irc.say(details.channel, require('util').format(game ? msgFormatGame : msgFormat, name, message));
+      irc.say(details.ircChannel, require('util').format(game ? msgFormatGame : msgFormat, name, message));
     } else if (msgType == Steam.EChatEntryType.Emote) {
-      irc.say(details.channel, require('util').format(game ? emoteFormatGame : emoteFormat, name, message));
+      irc.say(details.ircChannel, require('util').format(game ? emoteFormatGame : emoteFormat, name, message));
+    }
+    if (msgType == Steam.EChatEntryType.ChatMsg) {
+      slackWeb.chat.postMessage(slackChannelId, message, {username: name, icon_url: STEAM_ICON}, function() {});
     }
     
     var parts = message.split(/\s+/);
     var permissions = steam.chatRooms[chatRoom][chatter].permissions;
     
     if (parts[0] == '.k' && permissions & Steam.EChatPermission.Kick) {
-      irc.send('KICK', details.channel, parts[1], 'requested by ' + name);
+      irc.send('KICK', details.ircChannel, parts[1], 'requested by ' + name);
       
     } else if (parts[0] == '.kb' && permissions & Steam.EChatPermission.Ban) {
-      irc.send('MODE', details.channel, '+b', parts[1]);
-      irc.send('KICK', details.channel, parts[1], 'requested by ' + name);
+      irc.send('MODE', details.ircChannel, '+b', parts[1]);
+      irc.send('KICK', details.ircChannel, parts[1], 'requested by ' + name);
       
     } else if (parts[0] == '.unban' && permissions & Steam.EChatPermission.Ban) {
-      irc.send('MODE', details.channel, '-b', parts[1]);
+      irc.send('MODE', details.ircChannel, '-b', parts[1]);
       
     } else if (parts[0] == '.userlist') {
-      irc.send('NAMES', details.channel);
-      irc.once('names' + details.channel, function(nicks) {
-        steam.sendMessage(chatter, 'Users in ' + details.channel + ':\n' + Object.keys(nicks).map(function(key) {
+      irc.send('NAMES', details.ircChannel);
+      irc.once('names' + details.ircChannel, function(nicks) {
+        steam.sendMessage(chatter, 'Users in ' + details.ircChannel + ':\n' + Object.keys(nicks).map(function(key) {
           return nicks[key] + key;
         }).join('\n'));
       });
@@ -154,19 +183,29 @@ module.exports = function(details) {
     var name = steam.users[chatterActedOn].playerName + ' (http://steamcommunity.com/profiles/' + chatterActedOn + ')';
     switch (stateChange) {
       case Steam.EChatMemberStateChange.Entered:
-        irc.say(details.channel, name + ' entered chat.');
+        var msg = 'Steam - ' + name + ' entered chat.';
+        irc.say(details.ircChannel, msg);
+        slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
         break;
       case Steam.EChatMemberStateChange.Left:
-        irc.say(details.channel, name + ' left chat.');
+        var msg = 'Steam - ' + name + ' left chat.';
+        irc.say(details.ircChannel, msg);
+        slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
         break;
       case Steam.EChatMemberStateChange.Disconnected:
-        irc.say(details.channel, name + ' disconnected.');
+        var msg = 'Steam - ' + name + ' disconnected.';
+        irc.say(details.ircChannel, msg);
+        slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
         break;
       case Steam.EChatMemberStateChange.Kicked:
-        irc.say(details.channel, name + ' was kicked by ' + steam.users[chatterActedBy].playerName + '.');
+        var msg = 'Steam - ' + name + ' was kicked by ' + steam.users[chatterActedBy].playerName + '.';
+        irc.say(details.ircChannel, msg);
+        slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
         break;
       case Steam.EChatMemberStateChange.Banned:
-        irc.say(details.channel, name + ' was banned by ' + steam.users[chatterActedBy].playerName + '.');
+        var msg = 'Steam - ' + name + ' was banned by ' + steam.users[chatterActedBy].playerName + '.';
+        irc.say(details.ircChannel, msg);
+        slackWeb.chat.postMessage(slackChannelId, msg, {as_user: true}, function() {});
     }
   });
   
@@ -179,4 +218,41 @@ module.exports = function(details) {
   })
   
   steam.on('debug', console.log);
+
+  var slackWeb = new WebClient(details.slackToken);
+
+  var slackRtm = new RtmClient(details.slackToken, {
+    logLevel: 'debug', // check this out for more on logger: https://github.com/winstonjs/winston
+    dataStore: new MemoryDataStore() // pass a new MemoryDataStore instance to cache information
+  });
+
+  slackRtm.start();
+
+  slackRtm.on(CLIENT_EVENTS.RTM.AUTHENTICATED, function handleRTMAuthenticated() {
+    console.log('Slack RTM client authenticated!');
+
+    if (details.slackPrivate == true) {
+      slackChannelId = slackRtm.dataStore.getGroupByName(details.slackChannel).id;
+    } else {
+      slackChannelId = slackRtm.dataStore.getChannelByName(details.slackChannel).id;
+    }
+  });
+
+  slackRtm.on(RTM_EVENTS.MESSAGE, function handleRtmMessage(message) {
+
+    // TODO: Instead of ignoring all bots, should just ignore messages from this bot
+    if (message.subtype == "bot_message" || message.user == "U2KEF5VTR") {
+      return;
+    }
+
+    var channelName = slackRtm.dataStore.getChannelGroupOrDMById(message.channel).name;
+
+    if (channelName != details.slackChannel) {
+      return;
+    }
+
+    var userName = slackRtm.dataStore.getUserById(message.user).name;
+    irc.say(details.ircChannel, require('util').format(msgFormat, userName, message.text));
+    sendSteam('<' + userName + '> ' + message.text);
+  });
 };
