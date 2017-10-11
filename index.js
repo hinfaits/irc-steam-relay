@@ -8,9 +8,6 @@ var MemoryDataStore = Slack.MemoryDataStore;
 var CLIENT_EVENTS = Slack.CLIENT_EVENTS;
 var RTM_EVENTS = Slack.RTM_EVENTS;
 
-var IRC_ICON = "https://raw.githubusercontent.com/hinfaits/irc-steam-relay/master/static/icon/irc_icon.png";
-var STEAM_ICON = "https://raw.githubusercontent.com/hinfaits/irc-steam-relay/master/static/icon/steam_icon.png";
-
 // if we've saved a server list, use it
 if (fs.existsSync('servers')) {
   Steam.servers = JSON.parse(fs.readFileSync('servers'));
@@ -56,9 +53,11 @@ module.exports = function(details) {
   steam.on('chatMsg', function(chatRoom, message, msgType, chatter) {
     var game = steam.users[chatter].gameName;
     var name = steam.users[chatter].playerName;
+    var hash = steam.users[chatter].avatarHash.toString('hex');
+    var avatar_url = getAvatarURL(hash);
 
     if (msgType == Steam.EChatEntryType.ChatMsg) {
-      slackWeb.chat.postMessage(slackChannelId, message, {username: name, icon_url: STEAM_ICON}, function() {});
+      slackWeb.chat.postMessage(slackChannelId, message, {username: name, icon_url: avatar_url}, function() {});
     } else if (msgType == Steam.EChatEntryType.Emote) {
       // Steam emotes were removed a few years ago
       slackWeb.chat.postMessage(slackChannelId, message, {username: name, icon_url: STEAM_ICON}, function() {});
