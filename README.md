@@ -1,7 +1,7 @@
-irc-steam-relay
+chat-relay
 ===============
 
-Relays messages between a Steam chat room and an IRC channel using [node-irc](https://github.com/martynsmith/node-irc) and [node-steam](https://github.com/seishun/node-steam).
+Relays messages between a Steam chat room, an IRC channel, and Slack using [node-irc](https://github.com/martynsmith/node-irc), [node-steam](https://github.com/seishun/node-steam), and [node-slack-sdk](https://github.com/slackhq/node-slack-sdk).
 
 Installation
 -------------
